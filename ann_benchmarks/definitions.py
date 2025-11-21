@@ -333,7 +333,7 @@ def create_definitions_from_algorithm(name: str, algo: Dict[str, Any], dimension
             definitions.append(
                 Definition(
                     algorithm=name,
-                    docker_tag=algo["docker_tag"],
+                    docker_tag="localhost/" + algo["docker_tag"],
                     module=algo["module"],
                     constructor=algo["constructor"],
                     arguments=current_args,

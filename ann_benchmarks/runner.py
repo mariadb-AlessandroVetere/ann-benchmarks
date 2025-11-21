@@ -7,7 +7,7 @@ import time
 from typing import Dict, Optional, Tuple, List, Union
 
 import colors
-import docker
+import podman
 import numpy
 import psutil
 
@@ -315,19 +315,36 @@ def run_docker(
     cmd.append(json.dumps(definition.arguments))
     cmd += [json.dumps(qag) for qag in definition.query_argument_groups]
 
-    client = docker.from_env()
+    client = podman.from_env()
     if mem_limit is None:
         mem_limit = psutil.virtual_memory().available
+
+    # Define the period (100ms)
+    cpu_period = 100000
+    # Define the quota (100ms for 1 CPU core)
+    cpu_quota = int(cpu_limit) * int(cpu_period) if cpu_limit is not None else None
 
     container = client.containers.run(
         definition.docker_tag,
         cmd,
+        # Requires proper SELinux context on the host directories being mounted.
+        # $ sudo chcon -Rt container_file_t ./ann_benchmarks
+        # $ sudo chcon -Rt container_file_t ./data
+        # $ sudo chcon -Rt container_file_t ./results
         volumes={
             os.path.abspath("ann_benchmarks"): {"bind": "/home/app/ann_benchmarks", "mode": "ro"},
             os.path.abspath("data"): {"bind": "/home/app/data", "mode": "ro"},
             os.path.abspath("results"): {"bind": "/home/app/results", "mode": "rw"},
         },
-        cpuset_cpus=cpu_limit,
+        # cpuset_cpus=cpu_limit,
+        # podman.errors.exceptions.APIError: 500 Server Error: Internal Server Error (crun: controller `cpuset` is not available under /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/user.slice/libpod-06921a50fe74ac9bfdff429b8b7e8c5b68ec9c7c48628c8e8123799ba6cdea2b.scope/container/cgroup.controllers: OCI runtime error)
+        #
+        # $ cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers
+        # cpu io memory pids
+        #
+        # Use CFS Quota (requires 'cpu' controller, which I have)
+        cpu_period=cpu_period,
+        cpu_quota=cpu_quota,
         mem_limit=mem_limit,
         shm_size='10G',
         detach=True,
@@ -351,7 +368,7 @@ def run_docker(
         _handle_container_return_value(return_value, container, logger)
     except Exception as e:
         logger.error("Container.wait for container %s failed with exception", container.short_id)
-        logger.error(str(e))
+        logger.exception(e)
     finally:
         logger.info("Removing container")
         container.remove(force=True)
@@ -359,14 +376,14 @@ def run_docker(
 
 def _handle_container_return_value(
     return_value: Union[Dict[str, Union[int, str]], int],
-    container: docker.models.containers.Container,
+    container,#: podman.models.containers.Container,
     logger: logging.Logger
 ) -> None:
     """Handles the return value of a Docker container and outputs error and stdout messages (with colour).
 
     Args:
         return_value (Union[Dict[str, Union[int, str]], int]): The return value of the container.
-        container (docker.models.containers.Container): The Docker container.
+        container (podman.models.containers.Container): The Docker container.
         logger (logging.Logger): The logger instance.
     """
 
@@ -382,7 +399,14 @@ def _handle_container_return_value(
         msg = msg.format(exit_code)
 
     if exit_code not in [0, None]:
-        logger.error(colors.color(container.logs().decode(), fg="red"))
+        try:
+            logger.error(colors.color(container.logs().decode(), fg="red"))
+        except AttributeError:
+            for log in container.logs():
+                decoded_log = log.decode()
+                if len(decoded_log) > 0 and decoded_log[-1] == "\n":
+                    decoded_log = decoded_log[:-1]
+                logger.error(colors.color(decoded_log, fg="red"))
         logger.error(msg)
     else:
         logger.info(msg)

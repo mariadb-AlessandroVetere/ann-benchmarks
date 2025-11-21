@@ -267,13 +267,24 @@ class MariaDB(BaseANN):
             print("ERROR: Failed to start MariaDB database:", e)
             raise
 
+        def read_log_file():
+            try:
+                with open(os.environ.get('MARIADB_DB_WORKSPACE') + '/mariadb.err', 'r') as logf:
+                    return logf.read()
+            except Exception as e:
+                return f"Could not read log file: {e}"
+
         # Server is expected to start in less than 30s
         start_time = time.time()
         while True:
             if time.time() - start_time > 30:
+                log_content = read_log_file()
+                print(log_content if log_content else "No log content available.")
                 raise TimeoutError("Timeout waiting for MariaDB server to start")
             try:
                 if os.path.exists(self._socket_file):
+                    log_content = read_log_file()
+                    print(log_content if log_content else "No log content available.")
                     print("\nMariaDB server started!")
                     break
             except FileNotFoundError:
@@ -290,7 +301,7 @@ class MariaDB(BaseANN):
           CREATE TABLE t1 (
             id INT PRIMARY KEY,
             v VECTOR({len(X[0])}) NOT NULL,
-            VECTOR INDEX (v) DISTANCE_FUNCTION={self._metric}
+            VECTOR INDEX (v) DISTANCE={self._metric}
           ) MIN_ROWS={len(X)} ENGINE={self._engine}
         """)
 

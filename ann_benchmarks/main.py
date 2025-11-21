@@ -10,7 +10,7 @@ import shutil
 import sys
 from typing import List
 
-import docker
+import podman
 import psutil
 
 from .definitions import (Definition, InstantiationStatus, algorithm_status,
@@ -186,7 +186,7 @@ def filter_by_available_docker_images(definitions: List[Definition]) -> List[Def
     Returns:
         List[Definition]: A list of algorithm definitions that are associated with available Docker images.
     """
-    docker_client = docker.from_env()
+    docker_client = podman.from_env()
     docker_tags = {tag.split(":")[0] for image in docker_client.images.list() for tag in image.tags}
 
     missing_docker_images = set(d.docker_tag for d in definitions).difference(docker_tags)
