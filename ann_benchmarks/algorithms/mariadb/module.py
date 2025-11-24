@@ -144,7 +144,7 @@ class MariaDB(BaseANN):
             f"--socket={self._socket_file}",
             "--skip_networking",
             "--loose-innodb-buffer-pool-size=16G",
-            "--loose-mhnsw-cache-size=10G",
+            "--loose-mhnsw-max-cache-size=10G",
             f"--mhnsw_default_m={self._m}",
             "--skip_grant_tables"
         ]
