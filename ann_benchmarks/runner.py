@@ -322,7 +322,9 @@ def run_docker(
     # Define the period (100ms)
     cpu_period = 100000
     # Define the quota (100ms for 1 CPU core)
-    cpu_quota = int(cpu_limit) * int(cpu_period) if cpu_limit is not None else None
+    cpu_limit_int= 1 if not batch else max(1, int(multiprocessing.cpu_count()))
+    print(f"CPU limit was {cpu_limit}, computed limit is {cpu_limit_int} cores")
+    cpu_quota = cpu_limit_int * int(cpu_period)
 
     container = client.containers.run(
         definition.docker_tag,

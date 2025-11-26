@@ -133,8 +133,15 @@ class MariaDB(BaseANN):
         if mariadb_source_dir is not None:
             self._mariadb_init_cmd.append(f"--srcdir={mariadb_source_dir}")
 
+        if not self._batch:
+            self._mariadb_start_cmd = [
+                "taskset", "-c", "0", # bind to CPU 0 to reduce noise
+            ]
+        else:
+            self._mariadb_start_cmd = []
+
         # Command for starting MariaDB server
-        self._mariadb_start_cmd = [
+        self._mariadb_start_cmd+= [
             #'perf','record','-g', '--user-callchains', '--timestamp-filename', '--output=perf.perf',
             #'rr','record','-h',
             glob.glob(f"{mariadb_root_dir}/*/mariadbd")[0],
@@ -258,6 +265,14 @@ class MariaDB(BaseANN):
                 except (FileNotFoundError, IOError):
                     print("Error reading the perf stat file.")
 
+    @staticmethod
+    def read_log_file():
+        try:
+            with open(os.environ.get('MARIADB_DB_WORKSPACE') + '/mariadb.err', 'r') as logf:
+                return logf.read()
+        except Exception as e:
+            return f"Could not read log file: {e}"
+
     def start_db(self):
         try:
             print("\nStarting MariaDB server...")
@@ -267,23 +282,16 @@ class MariaDB(BaseANN):
             print("ERROR: Failed to start MariaDB database:", e)
             raise
 
-        def read_log_file():
-            try:
-                with open(os.environ.get('MARIADB_DB_WORKSPACE') + '/mariadb.err', 'r') as logf:
-                    return logf.read()
-            except Exception as e:
-                return f"Could not read log file: {e}"
-
         # Server is expected to start in less than 30s
         start_time = time.time()
         while True:
             if time.time() - start_time > 30:
-                log_content = read_log_file()
+                log_content = MariaDB.read_log_file()
                 print(log_content if log_content else "No log content available.")
                 raise TimeoutError("Timeout waiting for MariaDB server to start")
             try:
                 if os.path.exists(self._socket_file):
-                    log_content = read_log_file()
+                    log_content = MariaDB.read_log_file()
                     print(log_content if log_content else "No log content available.")
                     print("\nMariaDB server started!")
                     break
@@ -361,7 +369,13 @@ class MariaDB(BaseANN):
 
     def query(self, v, n):
         self._cur.execute(f"SELECT id FROM t1 ORDER by vec_distance_{self._metric}(v, %s) LIMIT %d", (vector_to_hex(v), n))
-        return [id for id, in self._cur.fetchall()]
+        results = self._cur.fetchall()
+        if self._cur.warnings > 0:
+            self._cur.execute("SHOW WARNINGS")
+            warnings = self._cur.fetchall()
+            for warning in warnings:
+                print("Warning during query:", warning)
+        return [id for id, in results]
 
     def get_memory_usage(self):
         return self._size/1024 # kB
@@ -388,3 +402,6 @@ class MariaDB(BaseANN):
         # Stop perf for searching and do final analysis
         self.perf_stop()
         self.perf_analysis()
+        # Read and print log file
+        log_content = MariaDB.read_log_file()
+        print(log_content if log_content else "No log content available.")
